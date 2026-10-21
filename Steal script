@@ -1,0 +1,723 @@
+-- Services
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local CoreGui = game:GetService("CoreGui")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+-- Cleanup existing GUI
+if CoreGui:FindFirstChild("LootEspHub") then
+    CoreGui.LootEspHub:Destroy()
+end
+
+-- Config & State with File Saving Support
+local Config = {
+    AutoCollect = false,
+    ItemESP = false,
+    MonsterESP = false,
+    PlayerESP = false,
+    MaxDistance = 20,
+    MinValue = 100,
+    MinWeight = 0,
+    MaxWeight = 3,
+    ForceThirdPerson = false,
+    NoClip = false,
+    SpeedEnabled = false,
+    SpeedValue = 25,
+    PresetValues = {
+        Val1 = 100,
+        Val2 = 280,
+        Val3 = 500,
+        Val4 = 1000
+    },
+    Keybinds = {
+        ToggleGui = Enum.KeyCode.Q,
+        Val100 = Enum.KeyCode.One,
+        Val250 = Enum.KeyCode.Two,
+        Val500 = Enum.KeyCode.Three,
+        Val1000 = Enum.KeyCode.Four
+    }
+}
+
+local ConfigFileName = "LootEspHub_Config.json"
+
+local function SaveConfig()
+    pcall(function()
+        if writefile then
+            local saveData = {
+                MaxDistance = Config.MaxDistance,
+                MinValue = Config.MinValue,
+                MinWeight = Config.MinWeight,
+                MaxWeight = Config.MaxWeight,
+                SpeedValue = Config.SpeedValue,
+                PresetValues = Config.PresetValues,
+                Keybinds = {
+                    ToggleGui = Config.Keybinds.ToggleGui.Name,
+                    Val100 = Config.Keybinds.Val100.Name,
+                    Val250 = Config.Keybinds.Val250.Name,
+                    Val500 = Config.Keybinds.Val500.Name,
+                    Val1000 = Config.Keybinds.Val1000.Name
+                }
+            }
+            writefile(ConfigFileName, HttpService:JSONEncode(saveData))
+        end
+    end)
+end
+
+local function LoadConfig()
+    pcall(function()
+        if readfile and isfile and isfile(ConfigFileName) then
+            local data = HttpService:JSONDecode(readfile(ConfigFileName))
+            if data then
+                Config.MaxDistance = data.MaxDistance or Config.MaxDistance
+                Config.MinValue = data.MinValue or Config.MinValue
+                Config.MinWeight = data.MinWeight or Config.MinWeight
+                Config.MaxWeight = data.MaxWeight or Config.MaxWeight
+                Config.SpeedValue = data.SpeedValue or Config.SpeedValue
+                if data.PresetValues then
+                    Config.PresetValues.Val1 = data.PresetValues.Val1 or Config.PresetValues.Val1
+                    Config.PresetValues.Val2 = data.PresetValues.Val2 or Config.PresetValues.Val2
+                    Config.PresetValues.Val3 = data.PresetValues.Val3 or Config.PresetValues.Val3
+                    Config.PresetValues.Val4 = data.PresetValues.Val4 or Config.PresetValues.Val4
+                end
+                if data.Keybinds then
+                    if data.Keybinds.ToggleGui then Config.Keybinds.ToggleGui = Enum.KeyCode[data.Keybinds.ToggleGui] or Config.Keybinds.ToggleGui end
+                    if data.Keybinds.Val100 then Config.Keybinds.Val100 = Enum.KeyCode[data.Keybinds.Val100] or Config.Keybinds.Val100 end
+                    if data.Keybinds.Val250 then Config.Keybinds.Val250 = Enum.KeyCode[data.Keybinds.Val250] or Config.Keybinds.Val250 end
+                    if data.Keybinds.Val500 then Config.Keybinds.Val500 = Enum.KeyCode[data.Keybinds.Val500] or Config.Keybinds.Val500 end
+                    if data.Keybinds.Val1000 then Config.Keybinds.Val1000 = Enum.KeyCode[data.Keybinds.Val1000] or Config.Keybinds.Val1000 end
+                end
+            end
+        end
+    end)
+end
+
+LoadConfig()
+
+-- Helper function to identify Mini Fridges and ignore them
+local function isMiniFridge(instance)
+    local name = instance.Name:lower()
+    return name:find("mini fridge") or name:find("minifridge") or name:find("fridge")
+end
+
+-- UI Constructor Helper
+local function create(className, properties)
+    local instance = Instance.new(className)
+    for k, v in pairs(properties) do
+        instance[k] = v
+    end
+    return instance
+end
+
+-- Main Window Setup
+local ScreenGui = create("ScreenGui", { Name = "LootEspHub", Parent = CoreGui })
+local MainFrame = create("Frame", {
+    Name = "MainFrame",
+    Size = UDim2.new(0, 400, 0, 280),
+    Position = UDim2.new(0.5, -200, 0.4, -140),
+    BackgroundColor3 = Color3.fromRGB(18, 18, 22),
+    BorderSizePixel = 0,
+    ClipsDescendants = true,
+    Parent = ScreenGui
+})
+create("UICorner", { CornerRadius = UDim.new(0, 8), Parent = MainFrame })
+create("UIStroke", { Color = Color3.fromRGB(45, 45, 55), Thickness = 1.2, Parent = MainFrame })
+
+local minValueBoxRef = nil
+
+local function updateMinValue(val)
+    Config.MinValue = val
+    if minValueBoxRef then
+        minValueBoxRef.Text = tostring(val)
+    end
+    SaveConfig()
+end
+
+-- Title Bar (Draggable Header)
+local TitleBar = create("Frame", {
+    Size = UDim2.new(1, 0, 0, 30),
+    BackgroundColor3 = Color3.fromRGB(24, 24, 30),
+    BorderSizePixel = 0,
+    Parent = MainFrame
+})
+create("UICorner", { CornerRadius = UDim.new(0, 8), Parent = TitleBar })
+
+create("TextLabel", {
+    Size = UDim2.new(1, -12, 1, 0),
+    Position = UDim2.new(0, 12, 0, 0),
+    BackgroundTransparency = 1,
+    Text = "⚡  Loot & ESP Hub Pro",
+    TextColor3 = Color3.fromRGB(240, 240, 255),
+    TextSize = 11,
+    Font = Enum.Font.GothamBold,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Parent = TitleBar
+})
+
+-- Dragging Logic
+local dragging, dragStart, startPos
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging, dragStart, startPos = true, input.Position, MainFrame.Position
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+-- Sidebar Navigation
+local Sidebar = create("Frame", {
+    Size = UDim2.new(0, 104, 1, -30),
+    Position = UDim2.new(0, 0, 0, 30),
+    BackgroundColor3 = Color3.fromRGB(21, 21, 26),
+    BorderSizePixel = 0,
+    Parent = MainFrame
+})
+
+local SidebarLayout = create("UIListLayout", {
+    HorizontalAlignment = Enum.HorizontalAlignment.Center,
+    SortOrder = Enum.SortOrder.LayoutOrder,
+    Padding = UDim.new(0, 5),
+    Parent = Sidebar
+})
+create("UIPadding", { PaddingTop = UDim.new(0, 8), Parent = Sidebar })
+
+-- Content Area Holder
+local ContainerHolder = create("Frame", {
+    Size = UDim2.new(1, -104, 1, -30),
+    Position = UDim2.new(0, 104, 0, 30),
+    BackgroundTransparency = 1,
+    Parent = MainFrame
+})
+
+local tabs = {}
+local activeTab = nil
+
+local function createTab(name)
+    local tabContent = create("ScrollingFrame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        ScrollBarThickness = 2,
+        Visible = false,
+        Parent = ContainerHolder
+    })
+    
+    local layout = create("UIListLayout", {
+        HorizontalAlignment = Enum.HorizontalAlignment.Center,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 6),
+        Parent = tabContent
+    })
+    create("UIPadding", { PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10), Parent = tabContent })
+    
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        tabContent.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20)
+    end)
+
+    local tabBtn = create("TextButton", {
+        Size = UDim2.new(1, -13, 0, 27),
+        BackgroundColor3 = Color3.fromRGB(28, 28, 35),
+        TextColor3 = Color3.fromRGB(150, 150, 170),
+        TextSize = 10,
+        Font = Enum.Font.GothamSemibold,
+        Text = name,
+        Parent = Sidebar
+    })
+    create("UICorner", { CornerRadius = UDim.new(0, 5), Parent = tabBtn })
+
+    tabBtn.MouseButton1Click:Connect(function()
+        for _, t in pairs(tabs) do
+            t.Content.Visible = false
+            TweenService:Create(t.Button, TweenInfo.new(0.2), { BackgroundColor3 = Color3.fromRGB(28, 28, 35), TextColor3 = Color3.fromRGB(150, 150, 170) }):Play()
+        end
+        tabContent.Visible = true
+        TweenService:Create(tabBtn, TweenInfo.new(0.2), { BackgroundColor3 = Color3.fromRGB(50, 100, 255), TextColor3 = Color3.fromRGB(255, 255, 255) }):Play()
+    end)
+
+    if not activeTab then
+        activeTab = tabContent
+        tabContent.Visible = true
+        tabBtn.BackgroundColor3 = Color3.fromRGB(50, 100, 255)
+        tabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    end
+
+    table.insert(tabs, { Content = tabContent, Button = tabBtn })
+    return tabContent
+end
+
+-- Create Tabs
+local LootTab = createTab("Loot")
+local EspTab = createTab("ESP")
+local KeybindTab = createTab("Keybind")
+local MiscTab = createTab("Misc")
+
+-- UI Component Builders
+local function AddToggle(parentTab, text, initialState, callback)
+    local btn = create("TextButton", {
+        Size = UDim2.new(1, -13, 0, 30),
+        BackgroundColor3 = initialState and Color3.fromRGB(0, 160, 110) or Color3.fromRGB(26, 26, 33),
+        TextColor3 = initialState and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(180, 180, 195),
+        TextSize = 10,
+        Font = Enum.Font.GothamMedium,
+        Text = "   " .. text .. (initialState and ": ON" or ": OFF"),
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = parentTab
+    })
+    create("UICorner", { CornerRadius = UDim.new(0, 5), Parent = btn })
+
+    local active = initialState
+    btn.MouseButton1Click:Connect(function()
+        active = not active
+        TweenService:Create(btn, TweenInfo.new(0.2), {
+            BackgroundColor3 = active and Color3.fromRGB(0, 160, 110) or Color3.fromRGB(26, 26, 33),
+            TextColor3 = active and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(180, 180, 195)
+        }):Play()
+        btn.Text = "   " .. text .. (active and ": ON" or ": OFF")
+        callback(active)
+    end)
+
+    return {
+        Set = function(state)
+            active = state
+            btn.BackgroundColor3 = active and Color3.fromRGB(0, 160, 110) or Color3.fromRGB(26, 26, 33)
+            btn.TextColor3 = active and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(180, 180, 195)
+            btn.Text = "   " .. text .. (active and ": ON" or ": OFF")
+            callback(active)
+        end
+    }
+end
+
+local function AddInput(parentTab, labelText, key)
+    local holder = create("Frame", { Size = UDim2.new(1, -13, 0, 30), BackgroundTransparency = 1, Parent = parentTab })
+    
+    create("TextLabel", {
+        Size = UDim2.new(0.55, 0, 1, 0),
+        Position = UDim2.new(0, 5, 0, 0),
+        BackgroundTransparency = 1,
+        Text = labelText,
+        TextColor3 = Color3.fromRGB(150, 150, 170),
+        TextSize = 10,
+        Font = Enum.Font.Gotham,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = holder
+    })
+    
+    local box = create("TextBox", {
+        Size = UDim2.new(0.4, 0, 0, 24),
+        Position = UDim2.new(0.6, 0, 0.1, 0),
+        BackgroundColor3 = Color3.fromRGB(24, 24, 30),
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        TextSize = 10,
+        Font = Enum.Font.GothamBold,
+        Text = tostring(Config[key]),
+        ClearTextOnFocus = false,
+        Parent = holder
+    })
+    create("UICorner", { CornerRadius = UDim.new(0, 5), Parent = box })
+    create("UIStroke", { Color = Color3.fromRGB(45, 45, 55), Thickness = 1, Parent = box })
+
+    if key == "MinValue" then
+        minValueBoxRef = box
+    end
+
+    box.FocusLost:Connect(function()
+        local num = tonumber(box.Text)
+        if num then 
+            Config[key] = num 
+            SaveConfig()
+        else 
+            box.Text = tostring(Config[key]) 
+        end
+    end)
+end
+
+local function AddKeybind(parentTab, labelText, keyName)
+    local holder = create("Frame", { Size = UDim2.new(1, -13, 0, 30), BackgroundTransparency = 1, Parent = parentTab })
+    
+    create("TextLabel", {
+        Size = UDim2.new(0.55, 0, 1, 0),
+        Position = UDim2.new(0, 5, 0, 0),
+        BackgroundTransparency = 1,
+        Text = labelText,
+        TextColor3 = Color3.fromRGB(150, 150, 170),
+        TextSize = 10,
+        Font = Enum.Font.Gotham,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = holder
+    })
+    
+    local btn = create("TextButton", {
+        Size = UDim2.new(0.4, 0, 0, 24),
+        Position = UDim2.new(0.6, 0, 0.1, 0),
+        BackgroundColor3 = Color3.fromRGB(24, 24, 30),
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        TextSize = 10,
+        Font = Enum.Font.GothamBold,
+        Text = Config.Keybinds[keyName].Name,
+        Parent = holder
+    })
+    create("UICorner", { CornerRadius = UDim.new(0, 5), Parent = btn })
+    create("UIStroke", { Color = Color3.fromRGB(45, 45, 55), Thickness = 1, Parent = btn })
+
+    local listening = false
+    btn.MouseButton1Click:Connect(function()
+        if listening then return end
+        listening = true
+        btn.Text = "Press Key..."
+        
+        local connection
+        connection = UserInputService.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Keyboard then
+                Config.Keybinds[keyName] = input.KeyCode
+                btn.Text = input.KeyCode.Name
+                listening = false
+                SaveConfig()
+                connection:Disconnect()
+            end
+        end)
+    end)
+end
+
+local function AddValuePresetInput(parentTab, keyLabelText, presetKey)
+    local holder = create("Frame", { Size = UDim2.new(1, -13, 0, 30), BackgroundTransparency = 1, Parent = parentTab })
+    
+    create("TextLabel", {
+        Size = UDim2.new(0.55, 0, 1, 0),
+        Position = UDim2.new(0, 5, 0, 0),
+        BackgroundTransparency = 1,
+        Text = keyLabelText .. "  =  $",
+        TextColor3 = Color3.fromRGB(200, 200, 220),
+        TextSize = 10,
+        Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = holder
+    })
+    
+    local box = create("TextBox", {
+        Size = UDim2.new(0.4, 0, 0, 24),
+        Position = UDim2.new(0.6, 0, 0.1, 0),
+        BackgroundColor3 = Color3.fromRGB(24, 24, 30),
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        TextSize = 10,
+        Font = Enum.Font.GothamBold,
+        Text = tostring(Config.PresetValues[presetKey]),
+        ClearTextOnFocus = false,
+        Parent = holder
+    })
+    create("UICorner", { CornerRadius = UDim.new(0, 5), Parent = box })
+    create("UIStroke", { Color = Color3.fromRGB(45, 45, 55), Thickness = 1, Parent = box })
+
+    box.FocusLost:Connect(function()
+        local num = tonumber(box.Text)
+        if num then 
+            Config.PresetValues[presetKey] = num 
+            SaveConfig()
+        else 
+            box.Text = tostring(Config.PresetValues[presetKey]) 
+        end
+    end)
+end
+
+-- Populate Tabs
+AddToggle(LootTab, "Auto Collect Loot", Config.AutoCollect, function(state) Config.AutoCollect = state end)
+AddInput(LootTab, "Max Distance (Studs)", "MaxDistance")
+AddInput(LootTab, "Min Value", "MinValue")
+AddInput(LootTab, "Min Weight", "MinWeight")
+AddInput(LootTab, "Max Weight", "MaxWeight")
+
+AddToggle(EspTab, "Player ESP", Config.PlayerESP, function(state) Config.PlayerESP = state end)
+AddToggle(EspTab, "Item ESP", Config.ItemESP, function(state) Config.ItemESP = state end)
+AddToggle(EspTab, "Monster ESP", Config.MonsterESP, function(state) Config.MonsterESP = state end)
+
+AddKeybind(KeybindTab, "Toggle GUI Key", "ToggleGui")
+
+local HeaderFrame = create("Frame", { Size = UDim2.new(1, -13, 0, 20), BackgroundTransparency = 1, Parent = KeybindTab })
+create("TextLabel", {
+    Size = UDim2.new(1, 0, 1, 0),
+    Position = UDim2.new(0, 5, 0, 0),
+    BackgroundTransparency = 1,
+    Text = "Loot Value Key Binds 🥵",
+    TextColor3 = Color3.fromRGB(240, 240, 255),
+    TextSize = 10,
+    Font = Enum.Font.GothamBold,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Parent = HeaderFrame
+})
+
+AddValuePresetInput(KeybindTab, "1 Key", "Val1")
+AddValuePresetInput(KeybindTab, "2 Key", "Val2")
+AddValuePresetInput(KeybindTab, "3 Key", "Val3")
+AddValuePresetInput(KeybindTab, "4 Key", "Val4")
+
+AddToggle(MiscTab, "Force Third Person", Config.ForceThirdPerson, function(state) 
+    Config.ForceThirdPerson = state 
+    if not state then
+        LocalPlayer.CameraMinZoomDistance = 0.5
+    end
+end)
+AddToggle(MiscTab, "NoClip", Config.NoClip, function(state) Config.NoClip = state end)
+AddToggle(MiscTab, "Speed Modifier", Config.SpeedEnabled, function(state) 
+    Config.SpeedEnabled = state 
+    if LocalPlayer.Character then
+        local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = state and Config.SpeedValue or 16
+        end
+    end
+end)
+AddInput(MiscTab, "Speed Value", "SpeedValue")
+
+-- Global Keybind Listener
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if UserInputService:GetFocusedTextBox() then return end
+    if gameProcessed then return end
+    
+    if input.KeyCode == Config.Keybinds.ToggleGui then
+        MainFrame.Visible = not MainFrame.Visible
+    elseif input.KeyCode == Config.Keybinds.Val100 then
+        updateMinValue(Config.PresetValues.Val1)
+    elseif input.KeyCode == Config.Keybinds.Val250 then
+        updateMinValue(Config.PresetValues.Val2)
+    elseif input.KeyCode == Config.Keybinds.Val500 then
+        updateMinValue(Config.PresetValues.Val3)
+    elseif input.KeyCode == Config.Keybinds.Val1000 then
+        updateMinValue(Config.PresetValues.Val4)
+    end
+end)
+
+-- Highlight Manager Utility
+local function toggleHighlight(target, state, color, name, displayText)
+    if state then
+        if not target:FindFirstChild(name) then
+            create("Highlight", {
+                Name = name,
+                Adornee = target,
+                FillColor = color,
+                OutlineColor = Color3.fromRGB(255, 255, 255),
+                FillTransparency = 0.3,
+                OutlineTransparency = 0,
+                Parent = target
+            })
+        end
+        
+        if displayText then
+            local part = target:IsA("Model") and (target.PrimaryPart or target:FindFirstChildWhichIsA("BasePart")) or target
+            if part then
+                local bill = part:FindFirstChild(name .. "_Info")
+                if not bill then
+                    bill = create("BillboardGui", { Name = name .. "_Info", Size = UDim2.new(0, 120, 0, 30), StudsOffset = Vector3.new(0, 3, 0), AlwaysOnTop = true, Parent = part })
+                    create("TextLabel", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, TextColor3 = color, TextStrokeTransparency = 0, TextSize = 13, Font = Enum.Font.GothamBold, Text = displayText, Parent = bill })
+                else
+                    local label = bill:FindFirstChildOfClass("TextLabel")
+                    if label then label.Text = displayText end
+                end
+            end
+        end
+    else
+        local hl = target:FindFirstChild(name)
+        if hl then hl:Destroy() end
+        local part = target:IsA("Model") and (target.PrimaryPart or target:FindFirstChildWhichIsA("BasePart")) or target
+        if part then
+            local bill = part:FindFirstChild(name .. "_Info")
+            if bill then bill:Destroy() end
+        end
+    end
+end
+
+-- Core Logic Loop (Auto Collect & Item ESP)
+task.spawn(function()
+    while true do
+        if Config.AutoCollect then
+            local lootFolder = Workspace:FindFirstChild("MyLoot")
+            local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            
+            if lootFolder and rootPart then
+                local batch = {}
+                for _, item in ipairs(lootFolder:GetChildren()) do
+                    if not isMiniFridge(item) then
+                        local prompt = item:FindFirstChild("ProximityPrompt", true)
+                        local part = item:IsA("Model") and (item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")) or (item:IsA("BasePart") and item)
+                        
+                        if prompt and part then
+                            local dist = (part.Position - rootPart.Position).Magnitude
+                            local weight = tonumber(item:GetAttribute("Weight") or (item:FindFirstChild("Weight") and item.Weight.Value)) or 0
+                            local value = tonumber(item:GetAttribute("Value") or (item:FindFirstChild("Value") and item.Value.Value)) or 0
+                            
+                            if dist <= Config.MaxDistance and value >= Config.MinValue and weight >= Config.MinWeight and weight <= Config.MaxWeight then
+                                table.insert(batch, { Prompt = prompt, Weight = weight })
+                            end
+                        end
+                    end
+                end
+
+                table.sort(batch, function(a, b) return a.Weight < b.Weight end)
+                for _, data in ipairs(batch) do
+                    if not Config.AutoCollect then break end
+                    pcall(fireproximityprompt, data.Prompt)
+                    task.wait(0.1)
+                end
+            end
+        end
+
+        local lootFolder = Workspace:FindFirstChild("MyLoot")
+        if lootFolder then
+            for _, item in ipairs(lootFolder:GetChildren()) do
+                if item:IsA("Model") or item:IsA("BasePart") then
+                    local itemNameLower = item.Name:lower()
+                    local isScrewdriver = itemNameLower:find("screwdriver") or itemNameLower:find("screw driver") or (item.Name == "Screwdriver")
+                    local isFridge = isMiniFridge(item)
+                    
+                    local weight = tonumber(item:GetAttribute("Weight") or (item:FindFirstChild("Weight") and item.Weight.Value)) or 0
+                    local value = tonumber(item:GetAttribute("Value") or (item:FindFirstChild("Value") and item.Value.Value)) or 0
+                    
+                    if value == 0 and not item:GetAttribute("Value") and not item:FindFirstChild("Value") then
+                        value = Config.MinValue
+                    end
+
+                    local inBounds = (value >= Config.MinValue and weight >= Config.MinWeight and weight <= Config.MaxWeight) or isScrewdriver
+
+                    -- Apply Item ESP if enabled and not a mini fridge
+                    if Config.ItemESP and inBounds and not isFridge then
+                        toggleHighlight(item, true, Color3.fromRGB(255, 215, 0), "Item_ESP_HL", nil)
+                        
+                        local part = item:IsA("Model") and (item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")) or item
+                        if part then
+                            local bill = part:FindFirstChild("Item_ESP_Info")
+                            if not bill then
+                                bill = create("BillboardGui", { Name = "Item_ESP_Info", Size = UDim2.new(0, 120, 0, 50), StudsOffset = Vector3.new(0, 2.5, 0), AlwaysOnTop = true, Parent = part })
+                                create("TextLabel", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, TextColor3 = Color3.fromRGB(255, 255, 255), TextStrokeTransparency = 0, TextSize = 12, Font = Enum.Font.GothamBold, Parent = bill })
+                            end
+                            
+                            local label = bill:FindFirstChildOfClass("TextLabel")
+                            if label then
+                                -- Color Tier Logic: Screwdriver (Blue) > Value >= 10000 (Black) > Value >= 1000 (Gold) > Default (White)
+                                if isScrewdriver then
+                                    label.TextColor3 = Color3.fromRGB(0, 150, 255)   -- Bright Blue
+                                elseif value >= 10000 then
+                                    label.TextColor3 = Color3.fromRGB(0, 0, 0)       -- Pure Black for $10,000+
+                                elseif value >= 1000 then
+                                    label.TextColor3 = Color3.fromRGB(255, 215, 0)   -- Gold for $1,000+
+                                else
+                                    label.TextColor3 = Color3.fromRGB(255, 255, 255) -- White
+                                end
+
+                                label.Text = string.format("%s\nW: %s | V: %s", item.Name, tostring(weight), tostring(value))
+                            end
+                        end
+                    else
+                        toggleHighlight(item, false, Color3.fromRGB(255, 215, 0), "Item_ESP_HL", nil)
+                        local part = item:IsA("Model") and (item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")) or item
+                        if part then
+                            local bill = part:FindFirstChild("Item_ESP_Info")
+                            if bill then bill:Destroy() end
+                        end
+                    end
+                end
+            end
+        end
+        task.wait(0.4)
+    end
+end)
+
+-- Real-time ESP (Players & Monsters) & Enforcers
+RunService.RenderStepped:Connect(function()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local character = player.Character
+            
+            local hasEntityChosen = (character:GetAttribute("EntityChosen") == true)
+                or (player:GetAttribute("EntityChosen") == true)
+                or (character:FindFirstChild("EntityChosen") ~= nil)
+                or (player:FindFirstChild("EntityChosen") ~= nil)
+
+            if Config.MonsterESP and hasEntityChosen then
+                toggleHighlight(character, true, Color3.fromRGB(0, 255, 0), "Monster_ESP_HL", player.Name)
+            else
+                toggleHighlight(character, false, Color3.fromRGB(0, 255, 0), "Monster_ESP_HL", nil)
+            end
+
+            if Config.PlayerESP and not hasEntityChosen then
+                toggleHighlight(character, true, Color3.fromRGB(255, 50, 50), "Player_ESP_HL", player.Name)
+            else
+                toggleHighlight(character, false, Color3.fromRGB(255, 50, 50), "Player_ESP_HL", nil)
+            end
+        end
+    end
+
+    -- AI Monster Detection list (Includes The Wendell, The Hollow, The Rictus, The Locust, and The Maternal Wraith)
+    local aiMonsters = { "wendell", "hollow", "rictus", "locust", "maternal wraith", "wraith" }
+    
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj:IsA("Model") and obj ~= LocalPlayer.Character and not Players:GetPlayerFromCharacter(obj) then
+            local nameLower = obj.Name:lower()
+            
+            if not nameLower:find("menu") then
+                local isAiMonster = false
+                
+                for _, entityName in ipairs(aiMonsters) do
+                    if nameLower:find(entityName) then
+                        isAiMonster = true
+                        break
+                    end
+                end
+                
+                if not isAiMonster then
+                    isAiMonster = (obj:GetAttribute("EntityChosen") == true)
+                        or (obj:FindFirstChild("EntityChosen") ~= nil)
+                        or (obj:GetAttribute("IsMonster") == true)
+                        or nameLower:find("monster")
+                        or nameLower:find("entity")
+                end
+
+                toggleHighlight(obj, Config.MonsterESP and isAiMonster, Color3.fromRGB(0, 255, 0), "Monster_ESP_HL", obj.Name)
+            end
+        end
+    end
+
+    if Config.ForceThirdPerson then
+        if LocalPlayer.CameraMinZoomDistance < 10 then
+            LocalPlayer.CameraMinZoomDistance = 10
+            LocalPlayer.CameraMaxZoomDistance = math.max(LocalPlayer.CameraMaxZoomDistance, 10)
+        end
+    end
+
+    if LocalPlayer.Character then
+        local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            if Config.SpeedEnabled then
+                if humanoid.WalkSpeed ~= Config.SpeedValue then
+                    humanoid.WalkSpeed = Config.SpeedValue
+                end
+            else
+                if humanoid.WalkSpeed == Config.SpeedValue then
+                    humanoid.WalkSpeed = 16
+                end
+            end
+        end
+    end
+end)
+
+-- NoClip Loop
+RunService.Stepped:Connect(function()
+    if Config.NoClip and LocalPlayer.Character then
+        for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
